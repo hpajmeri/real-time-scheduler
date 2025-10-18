@@ -1,6 +1,13 @@
-# Real-Time Scheduler: Deadline Monotonic Algorithm
+# Real-Time Scheduler Suite
 
-A production-grade simulator for **Deadline Monotonic (DM)** fixed-priority scheduling on single-core CPUs. Determines feasibility of periodic real-time task systems and provides preemption analysis.
+A production-grade collection of single-core real-time schedulers. The suite now includes:
+
+- **Deadline Monotonic (DM)** — the original fixed-deadline simulator (`rt_scheduler.py`).
+- **Rate Monotonic (RM)** — fixed-priority by period (`rate_monotonic_scheduler.py`).
+- **Earliest Deadline First (EDF)** — optimal dynamic-priority scheduler (`edf_scheduler.py`).
+- Shared preemptive engine and CLI helpers (`preemptive_priority_scheduler.py`, `rt_schedulers_extended.py`).
+
+Each scheduler determines task-set feasibility and reports preemption/timeline data when requested.
 
 ## Problem
 
@@ -8,11 +15,15 @@ Real-time systems power critical infrastructure: aircraft autopilot, medical dev
 
 **Question**: Given a set of periodic tasks with execution times, periods, and deadlines, can a CPU execute them all on time using fixed-priority scheduling?
 
-This simulator answers that question.
+This suite answers that question across multiple policies.
 
 ## Solution
 
-The scheduler implements **Deadline Monotonic** fixed-priority scheduling—a proven-optimal algorithm where tasks with shorter deadlines get higher CPU priority.
+The suite implements several canonical policies:
+
+- **Deadline Monotonic (DM)** — fixed priority by relative deadline; optimal among fixed-deadline assignments.
+- **Rate Monotonic (RM)** — fixed priority by period; optimal among fixed-period assignments.
+- **Earliest Deadline First (EDF)** — dynamic priority by imminent deadline; optimal for uniprocessors when utilization ≤ 1.
 
 ### Two Verification Methods
 
@@ -26,15 +37,11 @@ The scheduler implements **Deadline Monotonic** fixed-priority scheduling—a pr
 - Accurate: Detects timing patterns RTA might miss
 - Provides actual preemption counts
 
-Both methods must agree. If either says "infeasible," the scheduler rejects the task set.
+Both methods must agree. If either says "infeasible," the scheduler rejects the task set. RM reuses the same verification pipeline; EDF relies on utilization bound plus simulation.
 
 ## Why This Matters
 
-Deadline Monotonic is **provably optimal**: if DM can't schedule your tasks, *no* fixed-priority algorithm can. This means:
-
-- **Correctness**: The scheduler implements decades of academic scheduling theory
-- **Optimality**: No safer fixed-priority approach exists
-- **Practical**: Single sort assigns optimal priorities (by deadline)
+Deadline Monotonic is **provably optimal**: if DM can't schedule your tasks, *no* fixed-priority algorithm can. EDF extends coverage to dynamic-priority systems, and RM offers the classic Liu & Layland baseline.
 
 ## Technical Approach
 
@@ -45,7 +52,7 @@ For each task, compute worst-case response time considering interference from hi
 ### Event-Driven Simulation
 
 - Generate all job releases within hyperperiod H = LCM(P₀, ..., Pₙ)
-- Maintain ready queue sorted by deadline
+- Maintain ready queue sorted by policy-specific priority
 - At each time step: release new jobs → detect preemptions → execute highest-priority job
 - Count preemptions per task
 - Verify all deadlines met
@@ -57,13 +64,14 @@ Task periods can be fractional (0.001, 0.05, etc.). LCM computation with epsilon
 ## Implementation
 
 **Core Components**:
-- `rt_scheduler.py` (242 lines): Main scheduler
-  - Response Time Analysis implementation
-  - Event-driven simulation engine
-  - Heap-based priority queue
-  - Floating-point-safe arithmetic
-  
-- `test_scheduler.py`: Test harness with 39 diverse workload test cases
+
+- `rt_scheduler.py`: Original DM scheduler with dual verification
+- `preemptive_priority_scheduler.py`: Shared event-driven engine and CLI harness
+- `rate_monotonic_scheduler.py`: RM policy wrapper
+- `edf_scheduler.py`: EDF policy wrapper
+- `rt_schedulers_extended.py`: Policy dispatcher CLI (`python rt_schedulers_extended.py edf workloads/...`)
+- `test_scheduler.py`: Legacy DM workload regression suite
+- `test_*.py`: Unit tests for RM, EDF, and CLI integrations
 - `workloads/`: Test data directory with real-time workloads
 
 ## Example: Simple Task Set
@@ -106,11 +114,25 @@ Task periods can be fractional (0.001, 0.05, etc.). LCM computation with epsilon
 
 ## Getting Started
 
+### CLI Usage
+
+All commands print `1` on schedulable sets or `0` otherwise, followed by per-task preemption counts when applicable.
+
 ```bash
+# Deadline Monotonic (legacy)
 python3 rt_scheduler.py workloads/workload1.txt
+
+# Rate Monotonic
+python3 rate_monotonic_scheduler.py workloads/workload1.txt --timeline
+
+# Earliest Deadline First
+python3 edf_scheduler.py workloads/workload1.txt
+
+# Unified dispatcher (rm | edf)
+python3 rt_schedulers_extended.py edf workloads/workload1.txt --timeline
 ```
 
-Output: Feasibility (0 or 1) and preemption sequence per task.
+Timeline slices are emitted as `T{task}J{job}: start->end` lines when `--timeline` is set.
 
 ## References
 
@@ -120,4 +142,16 @@ Output: Feasibility (0 or 1) and preemption sequence per task.
 
 ---
 
-**Status**: Production-ready. Optimized for performance and correctness.
+## Testing
+
+Run targeted or full regression suites via:
+
+```bash
+python3 -m unittest -v
+```
+
+This covers DM legacy tests, RM/EDF unit modules, and CLI integrations.
+
+---
+
+**Status**: Production-ready. Optimized for performance, correctness, and policy flexibility.
