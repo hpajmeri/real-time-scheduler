@@ -6,9 +6,9 @@ import unittest
 from pathlib import Path
 
 
-class TestSchedulerCLIs(unittest.TestCase):
-    def _write_workload(self, tmpdir: Path, body: str) -> Path:
-        path = tmpdir / "workload.txt"
+class TestSchedulerCLI(unittest.TestCase):
+    def _write_workload(self, directory: Path, body: str) -> Path:
+        path = directory / "workload.txt"
         path.write_text(textwrap.dedent(body).strip() + "\n", encoding="ascii")
         return path
 
@@ -23,7 +23,7 @@ class TestSchedulerCLIs(unittest.TestCase):
                 """,
             )
             result = subprocess.run(
-                [sys.executable, "rate_monotonic_scheduler.py", str(workload)],
+                [sys.executable, "-m", "rt_scheduler.cli", "rm", str(workload)],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -44,7 +44,7 @@ class TestSchedulerCLIs(unittest.TestCase):
                 """,
             )
             result = subprocess.run(
-                [sys.executable, "edf_scheduler.py", str(workload)],
+                [sys.executable, "-m", "rt_scheduler.cli", "edf", str(workload)],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -52,6 +52,35 @@ class TestSchedulerCLIs(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             lines = result.stdout.strip().splitlines()
             self.assertEqual(lines[0], "0")
+
+    def test_llf_cli_schedulable_with_timeline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            workload = self._write_workload(
+                tmp_path,
+                """
+                1,4,4
+                1,6,6
+                """,
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "rt_scheduler.cli",
+                    "llf",
+                    str(workload),
+                    "--timeline",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            lines = result.stdout.strip().splitlines()
+            self.assertGreaterEqual(len(lines), 3)
+            self.assertEqual(lines[0], "1")
+            self.assertTrue(lines[2].startswith("T"))
 
 
 if __name__ == "__main__":

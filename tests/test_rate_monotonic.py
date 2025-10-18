@@ -1,6 +1,6 @@
 import unittest
 
-from rate_monotonic_scheduler import RateMonotonicScheduler
+from rt_scheduler.policies import RateMonotonicScheduler
 
 
 class TestRateMonotonicScheduler(unittest.TestCase):
@@ -24,6 +24,17 @@ class TestRateMonotonicScheduler(unittest.TestCase):
         result = scheduler.simulate(window=40.0)
         self.assertFalse(result.schedulable)
         self.assertGreaterEqual(len(result.deadline_misses), 1)
+
+    def test_instrumentation_fields_present(self) -> None:
+        tasks = [
+            {"execution": 1.0, "period": 3.0, "deadline": 3.0},
+            {"execution": 1.0, "period": 5.0, "deadline": 5.0},
+        ]
+        scheduler = RateMonotonicScheduler(tasks)
+        result = scheduler.simulate(window=30.0)
+        self.assertGreaterEqual(result.context_switches, 1)
+        self.assertGreater(result.cpu_time, 0.0)
+        self.assertGreaterEqual(result.idle_time, 0.0)
 
 
 if __name__ == "__main__":

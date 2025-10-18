@@ -4,20 +4,15 @@ from __future__ import annotations
 
 from typing import Dict, Sequence
 
-from preemptive_priority_scheduler import (
-    Job,
-    PreemptivePriorityScheduler,
-    PriorityKey,
-    run_scheduler_cli,
-)
-from rt_scheduler import EPSILON
+from ..core.engine import Job, PreemptivePriorityScheduler, PriorityKey, run_scheduler_cli
+from ..core.utils import EPSILON
 
 
 class RateMonotonicScheduler(PreemptivePriorityScheduler):
     def __init__(self, tasks: Sequence[Dict[str, float]]) -> None:
         super().__init__(tasks, name="rate_monotonic")
 
-    def priority_key(self, job: Job) -> PriorityKey:
+    def priority_key(self, job: Job, current_time: float) -> PriorityKey:
         task = self.original_tasks[job.task_id]
         return (task["period"], job.deadline, job.release_time, job.job_index)
 

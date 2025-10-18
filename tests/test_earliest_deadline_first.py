@@ -1,6 +1,6 @@
 import unittest
 
-from edf_scheduler import EarliestDeadlineFirstScheduler
+from rt_scheduler.policies import EarliestDeadlineFirstScheduler
 
 
 class TestEarliestDeadlineFirstScheduler(unittest.TestCase):

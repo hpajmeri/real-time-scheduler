@@ -4,20 +4,15 @@ from __future__ import annotations
 
 from typing import Dict, Sequence
 
-from preemptive_priority_scheduler import (
-    Job,
-    PreemptivePriorityScheduler,
-    PriorityKey,
-    run_scheduler_cli,
-)
-from rt_scheduler import EPSILON
+from ..core.engine import Job, PreemptivePriorityScheduler, PriorityKey, run_scheduler_cli
+from ..core.utils import EPSILON
 
 
 class EarliestDeadlineFirstScheduler(PreemptivePriorityScheduler):
     def __init__(self, tasks: Sequence[Dict[str, float]]) -> None:
         super().__init__(tasks, name="earliest_deadline_first")
 
-    def priority_key(self, job: Job) -> PriorityKey:
+    def priority_key(self, job: Job, current_time: float) -> PriorityKey:
         return (job.deadline, job.release_time, job.task_id, job.job_index)
 
     def feasibility_hint(self) -> bool:

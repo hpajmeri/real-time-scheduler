@@ -1,4 +1,4 @@
-"""Core utilities for preemptive priority-based real-time schedulers."""
+"""Event-driven engine for preemptive priority schedulers."""
 
 from __future__ import annotations
 
@@ -8,12 +8,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from rt_scheduler import (
-    EPSILON,
-    calculate_hyperperiod,
-    calculate_total_utilization,
-    parse_workload_file,
-)
+from .utils import EPSILON, calculate_hyperperiod, calculate_total_utilization, parse_workload_file
 
 MAX_SIM_WINDOW = 1e5
 
@@ -54,6 +49,10 @@ class ScheduleResult:
     timeline: List[TimelineSlice]
     deadline_misses: List[DeadlineMiss]
     utilization: float
+    context_switches: int
+    cpu_time: float
+    idle_time: float
+    overhead_time: float
 
     def __bool__(self) -> bool:
         return self.schedulable
@@ -65,19 +64,23 @@ PriorityKey = Tuple[float, float, int, int]
 class PreemptivePriorityScheduler:
     """Shared event-driven engine for priority schedulers."""
 
-    def __init__(self, tasks: Sequence[Dict[str, float]], *, name: str) -> None:
+    def __init__(self, tasks: Sequence[Dict[str, float]], *, name: str, context_switch_cost: float = 0.0) -> None:
         self.name = name
         self.original_tasks = [dict(task) for task in tasks]
         self.task_count = len(self.original_tasks)
         self.hyperperiod = calculate_hyperperiod(self.original_tasks)
         self.utilization = calculate_total_utilization(self.original_tasks)
+        self.context_switch_cost = max(0.0, context_switch_cost)
         self._validate_tasks()
 
-    def priority_key(self, job: Job) -> PriorityKey:
+    def priority_key(self, job: Job, current_time: float) -> PriorityKey:
         raise NotImplementedError
 
     def feasibility_hint(self) -> bool:
         return True
+
+    def dynamic_priority(self) -> bool:
+        return False
 
     def simulate(
         self,
@@ -86,16 +89,16 @@ class PreemptivePriorityScheduler:
         include_timeline: bool = False,
     ) -> ScheduleResult:
         if self.task_count == 0:
-            return ScheduleResult(True, [], [], [], 0.0)
+            return ScheduleResult(True, [], [], [], 0.0, 0, 0.0, 0.0, 0.0)
 
         if not self.feasibility_hint():
             miss = DeadlineMiss(task_id=-1, job_index=-1, miss_time=0.0)
-            return ScheduleResult(False, [0] * self.task_count, [], [miss], self.utilization)
+            return ScheduleResult(False, [0] * self.task_count, [], [miss], self.utilization, 0, 0.0, 0.0, 0.0)
 
         horizon = self._choose_window(window)
         jobs = self._generate_jobs(horizon)
         if not jobs:
-            return ScheduleResult(True, [0] * self.task_count, [], [], self.utilization)
+            return ScheduleResult(True, [0] * self.task_count, [], [], self.utilization, 0, 0.0, 0.0, 0.0)
 
         ready_queue: List[Tuple[PriorityKey, int, Job]] = []
         jobs_by_release = sorted(jobs, key=lambda j: (j.release_time, j.task_id, j.job_index))
@@ -108,11 +111,17 @@ class PreemptivePriorityScheduler:
         current_time = 0.0
         segment_start: Optional[float] = None
         completed_jobs = 0
+        context_switches = 0
+        cpu_time = 0.0
+        idle_time = 0.0
+        overhead_time = 0.0
+        last_task_id: Optional[int] = None
 
         while completed_jobs < len(jobs):
             if executing is None and not ready_queue and job_release_index < len(jobs_by_release):
                 jump_time = jobs_by_release[job_release_index].release_time
                 if jump_time > current_time + EPSILON:
+                    idle_time += jump_time - current_time
                     current_time = jump_time
 
             while (
@@ -120,12 +129,15 @@ class PreemptivePriorityScheduler:
                 and jobs_by_release[job_release_index].release_time <= current_time + EPSILON
             ):
                 job = jobs_by_release[job_release_index]
-                heapq.heappush(ready_queue, (self.priority_key(job), sequence, job))
+                heapq.heappush(ready_queue, (self.priority_key(job, current_time), sequence, job))
                 sequence += 1
                 job_release_index += 1
 
+            if self.dynamic_priority() and ready_queue:
+                sequence = self._refresh_ready_queue(ready_queue, current_time, sequence)
+
             if executing is not None and ready_queue:
-                exec_key = self.priority_key(executing)
+                exec_key = self.priority_key(executing, current_time)
                 top_key, _, top_job = ready_queue[0]
                 if self._key_less(top_key, exec_key) or (
                     self._keys_close(top_key, exec_key) and self._job_preempts(top_job, executing)
@@ -147,6 +159,10 @@ class PreemptivePriorityScheduler:
 
             if executing is None and ready_queue:
                 _, _, executing = heapq.heappop(ready_queue)
+                if last_task_id is None or last_task_id != executing.task_id:
+                    context_switches += 1
+                    overhead_time += self.context_switch_cost
+                last_task_id = executing.task_id
                 segment_start = current_time
 
             next_release = (
@@ -164,6 +180,9 @@ class PreemptivePriorityScheduler:
             run_time = max(0.0, next_event - current_time)
             if executing is not None and run_time > 0:
                 executing.remaining_time -= run_time
+                cpu_time += run_time
+            elif run_time > 0:
+                idle_time += run_time
             current_time = next_event
 
             for job in jobs:
@@ -192,6 +211,10 @@ class PreemptivePriorityScheduler:
                     timeline if include_timeline else [],
                     deadline_misses,
                     self.utilization,
+                    context_switches,
+                    cpu_time,
+                    idle_time,
+                    overhead_time,
                 )
 
             if executing is not None and executing.remaining_time <= EPSILON:
@@ -215,6 +238,10 @@ class PreemptivePriorityScheduler:
             timeline if include_timeline else [],
             deadline_misses,
             self.utilization,
+            context_switches,
+            cpu_time,
+            idle_time,
+            overhead_time,
         )
 
     def _generate_jobs(self, window: float) -> List[Job]:
@@ -269,6 +296,21 @@ class PreemptivePriorityScheduler:
             incumbent.task_id,
             incumbent.job_index,
         )
+
+    def _refresh_ready_queue(
+        self,
+        ready_queue: List[Tuple[PriorityKey, int, Job]],
+        current_time: float,
+        sequence: int,
+    ) -> int:
+        if not ready_queue:
+            return sequence
+        items = [entry[2] for entry in ready_queue]
+        ready_queue.clear()
+        for job in items:
+            heapq.heappush(ready_queue, (self.priority_key(job, current_time), sequence, job))
+            sequence += 1
+        return sequence
 
     def _validate_tasks(self) -> None:
         for idx, task in enumerate(self.original_tasks):

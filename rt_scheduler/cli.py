@@ -1,21 +1,29 @@
-"""Convenience helpers for the extended real-time scheduler suite."""
+"""Command-line dispatch utilities for the scheduler suite."""
 
 from __future__ import annotations
 
 import argparse
 import sys
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional, Sequence, Type
 
-from edf_scheduler import EarliestDeadlineFirstScheduler
-from preemptive_priority_scheduler import PreemptivePriorityScheduler
-from rate_monotonic_scheduler import RateMonotonicScheduler
-from rt_scheduler import parse_workload_file
+from .core.engine import PreemptivePriorityScheduler
+from .core.utils import parse_workload_file
+from .policies import (
+    DeadlineMonotonicScheduler,
+    EarliestDeadlineFirstScheduler,
+    LeastLaxityFirstScheduler,
+    RateMonotonicScheduler,
+)
 
-POLICY_MAP: Dict[str, type[PreemptivePriorityScheduler]] = {
+POLICY_MAP: Dict[str, Type[PreemptivePriorityScheduler]] = {
+    "dm": DeadlineMonotonicScheduler,
+    "deadline_monotonic": DeadlineMonotonicScheduler,
     "rm": RateMonotonicScheduler,
     "rate_monotonic": RateMonotonicScheduler,
     "edf": EarliestDeadlineFirstScheduler,
     "earliest_deadline_first": EarliestDeadlineFirstScheduler,
+    "llf": LeastLaxityFirstScheduler,
+    "least_laxity_first": LeastLaxityFirstScheduler,
 }
 
 
